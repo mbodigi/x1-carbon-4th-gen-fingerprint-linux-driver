@@ -42,7 +42,8 @@ haven't been re-run start to finish in this form. Read them before running them.
    (`create_enrollment` → `0401`). So it's removed again, and Fedora's own `fprintd` + `fprintd-pam`
    run on a libfprint 1.94.100 that has the vfs0090 driver from
    [Zaytzew/libfprint-vfs0090-1.94](https://github.com/Zaytzew/libfprint-vfs0090-1.94).
-   The script pins it with `dnf versionlock`.
+   It's a single RPM: installing it pulls in `fprintd` and `fprintd-pam` from Fedora, and its
+   Epoch 1 keeps Fedora's own libfprint from updating over it.
 
 ## Install
 
@@ -58,7 +59,7 @@ fprintd-verify
 ### Or with the prebuilt RPMs (Fedora 44, x86_64)
 
 The [release](https://github.com/mbodigi/x1-carbon-4th-gen-fingerprint-linux-driver/releases) has the
-five RPMs built from these specs on the tested laptop (unsigned; check them against `SHA256SUMS`).
+RPMs built from these specs on the tested laptop (unsigned; check them against `SHA256SUMS`).
 No build tools or build time needed:
 
 ```sh
@@ -69,8 +70,9 @@ PREBUILT=rpms scripts/1-pair.sh
 PREBUILT=rpms scripts/2-libfprint.sh
 ```
 
-They are the exact packages running on the tested machine. They only fit Fedora 44 (Python 3.14,
-libfprint 1.94.100); on anything else, build from source.
+Stage 2 is one file: `libfprint-1.94.100-1.vfs0090` installs the driver and pulls in `fprintd`
+and `fprintd-pam` by itself. The four others are only for the one-time pairing in stage 1.
+They only fit Fedora 44 (Python 3.14, libfprint 1.94.100); on anything else, build from source.
 
 Fingerprint for sudo, login and GNOME: `sudo authselect enable-feature with-fingerprint`. The
 scripts leave that choice to you.
@@ -89,8 +91,9 @@ left, rolled right. If `fprintd-verify` keeps failing, `fprintd-delete $USER` an
   then lift.
 - **Match on host.** Templates are stored on the computer (`/var/lib/fprint`, root only), not in the
   sensor.
-- **Keep libfprint pinned.** A Fedora libfprint update would replace the patched one and the reader
-  would stop working; `dnf versionlock list` shows the lock. After a Fedora upgrade, rebuild.
+- **The driver outranks Fedora's libfprint** (Epoch 1), so updates leave it alone. If a future
+  fprintd ever needs a newer libfprint, dnf will report a conflict instead of silently breaking the
+  reader: rebuild from the spec then. After a Fedora release upgrade, rebuild.
 - After a cancelled scan the driver logs `Deactivation failed at state 1 … transfer timed out` and
   takes about 3 s to release the sensor. Harmless so far.
 - The driver and both patches are community work, outside Fedora and upstream libfprint, in your
@@ -109,7 +112,6 @@ left, rolled right. If `fprintd-verify` keeps failing, `fprintd-delete $USER` an
 ## Undo
 
 ```sh
-sudo dnf versionlock delete libfprint
 sudo dnf -y distro-sync libfprint     # back to Fedora's build (the reader stops working)
 ```
 
