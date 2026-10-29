@@ -113,14 +113,17 @@ fingerprint-upgrade    # rebuild + install the driver from the latest sources, t
 `libfprint`/`fprintd` with the last check (the first run saves a baseline) and says
 `UPDATE AVAILABLE` when a driver rebuild makes sense.
 
-`fingerprint-upgrade` takes Fedora's current libfprint source package and the latest
-`0001-vfs0090-driver.patch` from the port, applies the same spec changes as `libfprint/libfprint.spec`
+`fingerprint-upgrade` first compares Fedora's current libfprint version and the port's latest
+`0001-vfs0090-driver.patch` with what the installed driver was built from; if both are the same it
+says `Already up to date` and builds nothing (`--force` rebuilds anyway). Otherwise it takes Fedora's
+current libfprint source package and the latest patch, applies the same spec changes as `libfprint/libfprint.spec`
 (Epoch 1, `Requires: fprintd fprintd-pam`), builds and installs it, restarts `fprintd`, asks for one
 touch, copies the new spec into this repo (no commit) and removes the build packages again. If the
 patch doesn't fit a newer libfprint, it stops before installing anything.
 
-Tested so far: the check, and that the spec conversion reproduces `libfprint/libfprint.spec` exactly.
-The full `fingerprint-upgrade` run hasn't been done yet.
+Tested on the X1 Carbon 4th gen: the check; the "already up to date" path; and a full forced run
+(rebuild from Fedora's source package, reinstall, build packages removed again). The spec conversion
+reproduces `libfprint/libfprint.spec` exactly. A rebuild for a real upstream change hasn't happened yet.
 
 ## Troubleshooting (from the pairing run)
 
