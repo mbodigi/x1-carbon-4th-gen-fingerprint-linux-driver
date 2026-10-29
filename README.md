@@ -99,6 +99,29 @@ left, rolled right. If `fprintd-verify` keeps failing, `fprintd-delete $USER` an
 - The driver and both patches are community work, outside Fedora and upstream libfprint, in your
   authentication path. Decide for yourself where you use it.
 
+## Updates
+
+Nothing updates this driver automatically. Two commands let you check and rebuild when you like:
+
+```sh
+ln -s "$PWD/scripts/fingerprint-update" "$PWD/scripts/fingerprint-upgrade" ~/.local/bin/
+fingerprint-update     # is there anything new upstream since the last check?
+fingerprint-upgrade    # rebuild + install the driver from the latest sources, then test it
+```
+
+`fingerprint-update` compares the python-validity PR and commits, the vfs0090 port, and Fedora's
+`libfprint`/`fprintd` with the last check (the first run saves a baseline) and says
+`UPDATE AVAILABLE` when a driver rebuild makes sense.
+
+`fingerprint-upgrade` takes Fedora's current libfprint source package and the latest
+`0001-vfs0090-driver.patch` from the port, applies the same spec changes as `libfprint/libfprint.spec`
+(Epoch 1, `Requires: fprintd fprintd-pam`), builds and installs it, restarts `fprintd`, asks for one
+touch, copies the new spec into this repo (no commit) and removes the build packages again. If the
+patch doesn't fit a newer libfprint, it stops before installing anything.
+
+Tested so far: the check, and that the spec conversion reproduces `libfprint/libfprint.spec` exactly.
+The full `fingerprint-upgrade` run hasn't been done yet.
+
 ## Troubleshooting (from the pairing run)
 
 | Message | What it was |

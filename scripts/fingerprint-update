@@ -1,0 +1,123 @@
+#!/bin/bash
+# Fingerprint driver (138a:0090, X1 Carbon 4th gen) updates, run whenever you like:
+#   fingerprint-update     check: is there an update upstream since the last check?
+#   fingerprint-upgrade    (a link to this script) rebuild the driver RPM from Fedora's current libfprint
+#                          + the latest vfs0090 patch, install it, test it, update the repo (commit, no push)
+# Needs a sensor already set up with scripts/1-pair.sh + scripts/2-libfprint.sh. Uses sudo.
+# Link both names into your PATH from this repo, e.g.:
+#   ln -s "$PWD/scripts/fingerprint-update" "$PWD/scripts/fingerprint-upgrade" ~/.local/bin/
+set -euo pipefail
+REPO=$(cd "$(dirname "$(realpath "$0")")/.." && pwd)
+STATE=${XDG_STATE_HOME:-$HOME/.local/state}/fingerprint-update
+PATCH_URL=https://raw.githubusercontent.com/Zaytzew/libfprint-vfs0090-1.94/HEAD/0001-vfs0090-driver.patch
+
+status() {
+    echo "python-validity PR #294: $(gh api repos/uunicorn/python-validity/pulls/294 --jq '.state + (if .merged then " (merged)" else "" end)' 2>/dev/null || echo '?')"
+    echo "python-validity latest commit: $(gh api 'repos/uunicorn/python-validity/commits?per_page=1' --jq '.[0].sha[0:7] + " " + .[0].commit.committer.date[0:10]' 2>/dev/null || echo '?')"
+    echo "libfprint vfs0090 port latest commit: $(gh api 'repos/Zaytzew/libfprint-vfs0090-1.94/commits?per_page=1' --jq '.[0].sha[0:7] + " " + .[0].commit.committer.date[0:10]' 2>/dev/null || echo '?')"
+    echo "Fedora libfprint: $(dnf -q repoquery --refresh --latest-limit 1 --qf '%{version}-%{release}' libfprint 2>/dev/null || echo '?')"
+    echo "Fedora fprintd: $(dnf -q repoquery --latest-limit 1 --qf '%{version}-%{release}' fprintd 2>/dev/null || echo '?')"
+}
+
+check() {
+    local now; now=$(status)
+    echo "$now"
+    echo "installed driver: $(rpm -q --qf '%{EPOCH}:%{VERSION}-%{RELEASE}' libfprint)"
+    echo
+    if grep -q ': ?$' <<<"$now"; then echo "Some lookups failed (offline?); try again later."; return; fi
+    if [ -f "$STATE" ]; then
+        local changes; changes=$(diff "$STATE" <(echo "$now") | sed -n 's/^> /  /p')
+        if [ -n "$changes" ]; then
+            echo "Changed since the last check:"; echo "$changes"; echo
+            grep -q "port\|Fedora libfprint" <<<"$changes" && echo "-> UPDATE AVAILABLE for the driver: run  fingerprint-upgrade"
+            grep -q "python-validity" <<<"$changes" && echo "-> python-validity only matters for pairing (already done); nothing to rebuild for that."
+            grep -q "Fedora fprintd" <<<"$changes" && echo "-> New fprintd: a normal 'dnf upgrade' installs it; if it needs a newer libfprint, run  fingerprint-upgrade"
+        else
+            echo "No update: nothing new since the last check."
+        fi
+    else
+        echo "(first check: saved as the baseline)"
+    fi
+    echo "$now" > "$STATE"
+}
+
+# Fedora's libfprint spec -> our driver spec: Patch0, release suffix, Epoch 1, Requires fprintd + fprintd-pam
+make_spec() {
+    python3 -I - "$1" <<'EOF'
+import re, sys
+p = sys.argv[1]; t = open(p).read()
+t = re.sub(r'^(Release:\s*)%autorelease.*$', r'\g<1>%autorelease -e vfs0090', t, count=1, flags=re.M)
+t = re.sub(r'^(Version:\s*\S+\n)', r'\1# Epoch 1: Fedora\'s own libfprint (epoch 0) can never update over this build\nEpoch:          1\n', t, count=1, flags=re.M)
+t = re.sub(r'^(Source0:.*\n)', r'\1# Validity 138a:0090 driver, github.com/Zaytzew/libfprint-vfs0090-1.94\nPatch0:         0001-vfs0090-driver.patch\n', t, count=1, flags=re.M)
+t = re.sub(r'\n%description\n', '\n# installing the driver brings the daemon and the PAM module with it\nRequires:       fprintd\nRequires:       fprintd-pam\n\n%description\n', t, count=1)
+t = t.replace('= %{version}-%{release}', '= %{epoch}:%{version}-%{release}')
+for must in ('Epoch:          1', 'Patch0:', 'Requires:       fprintd-pam', '-e vfs0090'):
+    if must not in t: sys.exit('spec transformation failed: ' + must)
+if '%autosetup' not in t and '%patch' not in t:
+    sys.exit('Fedora spec has no %autosetup: patch would not be applied')
+open(p, 'w').write(t)
+EOF
+}
+
+build() {
+    local W; W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
+    local B=$REPO/build/libfprint
+    rm -rf "$B"; mkdir -p "$B"/{SOURCES,SPECS}
+
+    echo "== Fedora's current libfprint source + the latest vfs0090 patch"
+    (cd "$W" && dnf -q download --source libfprint && rpm2cpio libfprint-*.src.rpm | cpio -idm --quiet)
+    cp "$W"/*.tar.* "$B/SOURCES/"
+    cp "$W"/libfprint.spec "$B/SPECS/"
+    curl -fsSL -o "$B/SOURCES/0001-vfs0090-driver.patch" "$PATCH_URL"
+    make_spec "$B/SPECS/libfprint.spec"
+
+    echo "== build tools"
+    rpm -qa --qf '%{name}\n' | sort -u > "$W/before.txt"
+    sudo dnf -y -q install rpm-build
+    sudo dnf -y -q builddep "$B/SPECS/libfprint.spec"
+
+    echo "== building (a few minutes, log: $B/build.log)"
+    if ! rpmbuild --define "_topdir $B" -bb "$B/SPECS/libfprint.spec" > "$B/build.log" 2>&1; then
+        echo "BUILD FAILED (often: the patch no longer fits a newer libfprint). Your driver is unchanged."
+        echo "See $B/build.log. Removing the build tools again."
+        cleanup "$W"; exit 1
+    fi
+    local rpm; rpm=$(ls "$B"/RPMS/x86_64/libfprint-*vfs0090*.x86_64.rpm | grep -v -e devel -e debug -e tests)
+    echo "built: $(rpm -qp --qf '%{EPOCH}:%{NAME}-%{VERSION}-%{RELEASE}' "$rpm")"
+
+    echo "== installing + restarting fprintd (it keeps the old library loaded until restarted)"
+    sudo dnf -y remove libfprint-devel >/dev/null 2>&1 || true
+    sudo dnf -y reinstall "$rpm" 2>/dev/null || sudo dnf -y install "$rpm"
+    sudo systemctl stop fprintd
+    rpm -q libfprint
+
+    echo "== test: touch the sensor, then lift"
+    fprintd-verify 2>&1 | grep "Verify result" || true
+
+    echo "== updating this repo's copy of the spec and patch (no commit)"
+    cp "$B/SPECS/libfprint.spec" "$B/SOURCES/0001-vfs0090-driver.patch" "$REPO/libfprint/"
+    mkdir -p "$REPO/dist" && cp "$rpm" "$REPO/dist/" && (cd "$REPO/dist" && sha256sum *.rpm > SHA256SUMS)
+    if [ -n "$(git -C "$REPO" status --porcelain libfprint 2>/dev/null)" ]; then
+        echo "spec/patch changed: see  git -C $REPO diff libfprint"
+    else
+        echo "spec/patch unchanged (same sources as before)"
+    fi
+
+    cleanup "$W"
+    echo; echo "Done."
+}
+
+# remove what the build installed (names that weren't there before and nothing else needs)
+cleanup() {
+    local W=$1
+    rpm -qa --qf '%{name}\n' | sort -u > "$W/after.txt"
+    comm -13 "$W/before.txt" "$W/after.txt" | grep -vxE 'libfprint|fprintd|fprintd-pam' > "$W/new.txt" || true
+    [ -s "$W/new.txt" ] || return 0
+    echo "== removing $(wc -l < "$W/new.txt") build packages"
+    sudo dnf -y -q remove $(tr '\n' ' ' < "$W/new.txt") || echo "(cleanup failed; remove them later with dnf autoremove)"
+}
+
+case "$(basename "$0")" in
+    fingerprint-upgrade) build ;;
+    *) check ;;
+esac
