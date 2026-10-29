@@ -3,6 +3,7 @@
 # (+ the 0090 patches and PR #294) rebuilt for Fedora 44. Pairing writes TLS keys and Lenovo's
 # firmware extension into the sensor's flash; stage 2 then uses the sensor through libfprint.
 # This FACTORY-RESETS the sensor first: fingerprints stored on the chip (e.g. from Windows) are erased.
+# PREBUILT=<dir> uses the release RPMs in <dir> instead of building them (no build tools needed).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO=$PWD
@@ -11,8 +12,12 @@ B=$REPO/build
 [ "$(id -u)" != 0 ] || { echo "Run as your normal user; the script uses sudo where needed." >&2; exit 1; }
 lsusb -d 138a:0090 >/dev/null || { echo "No 138a:0090 fingerprint sensor found (lsusb -d 138a:0090)." >&2; exit 1; }
 
-echo "== build tools"
-sudo dnf -y install rpm-build rpmdevtools dnf5-plugins innoextract policycoreutils-python-utils
+if [ -n "${PREBUILT:-}" ]; then
+    sudo dnf -y install innoextract policycoreutils-python-utils
+else
+    echo "== build tools"
+    sudo dnf -y install rpm-build rpmdevtools dnf5-plugins innoextract policycoreutils-python-utils
+fi
 
 build() {   # build <dir> <spec>: fetch sources, install build deps, build the RPMs as this user
     local d=$B/$1
@@ -23,16 +28,22 @@ build() {   # build <dir> <spec>: fetch sources, install build deps, build the R
     echo "== building $1 (log: $d/build.log)"
     rpmbuild --define "_topdir $d" -bb "$d/SPECS/$2" > "$d/build.log" 2>&1 || { echo "build failed, see $d/build.log" >&2; exit 1; }
 }
-build fprintd-clients fprintd-clients.spec
-build open-fprintd open-fprintd.spec
-build python-validity python-validity.spec
+if [ -n "${PREBUILT:-}" ]; then
+    P=$(realpath "$PREBUILT")
+    rpms=("$P"/fprintd-clients-1.94.2-*.x86_64.rpm "$P"/fprintd-clients-pam-1.94.2-*.x86_64.rpm
+          "$P"/open-fprintd-*.noarch.rpm "$P"/python3-validity-*.noarch.rpm)
+else
+    build fprintd-clients fprintd-clients.spec
+    build open-fprintd open-fprintd.spec
+    build python-validity python-validity.spec
+    rpms=("$B"/fprintd-clients/RPMS/x86_64/fprintd-clients-1.94.2-*.x86_64.rpm
+          "$B"/fprintd-clients/RPMS/x86_64/fprintd-clients-pam-1.94.2-*.x86_64.rpm
+          "$B"/open-fprintd/RPMS/noarch/open-fprintd-*.noarch.rpm
+          "$B"/python-validity/RPMS/noarch/python3-validity-*.noarch.rpm)
+fi
 
 echo "== installing (replaces Fedora's fprintd/fprintd-pam until stage 2)"
-sudo dnf -y install \
-    "$B"/fprintd-clients/RPMS/x86_64/fprintd-clients-1.94.2-*.x86_64.rpm \
-    "$B"/fprintd-clients/RPMS/x86_64/fprintd-clients-pam-1.94.2-*.x86_64.rpm \
-    "$B"/open-fprintd/RPMS/noarch/open-fprintd-*.noarch.rpm \
-    "$B"/python-validity/RPMS/noarch/python3-validity-*.noarch.rpm
+sudo dnf -y install "${rpms[@]}"
 
 # SELinux: the driver lives under /usr/lib and would run in init_t, which may not write its state
 # file under /usr/share ("Permission denied: .../backoff"). Label it as a program so it runs as an

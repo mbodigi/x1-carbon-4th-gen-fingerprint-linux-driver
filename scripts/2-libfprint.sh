@@ -1,30 +1,35 @@
 #!/bin/bash
 # Stage 2: replace the python-validity stack with Fedora's own fprintd + fprintd-pam and a libfprint
 # that has the vfs0090 driver (needs a sensor paired by scripts/1-pair.sh). Pins libfprint so a
-# Fedora update doesn't replace it.
+# Fedora update doesn't replace it. PREBUILT=<dir> uses the release RPM in <dir> instead of building it.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO=$PWD
 B=$REPO/build/libfprint
 
 [ "$(id -u)" != 0 ] || { echo "Run as your normal user; the script uses sudo where needed." >&2; exit 1; }
-command -v spectool >/dev/null || sudo dnf -y install rpm-build rpmdevtools dnf5-plugins
-
-echo "== building libfprint 1.94.100 + vfs0090 (log: $B/build.log)"
-rm -rf "$B"; mkdir -p "$B"/{SOURCES,SPECS}
-cp "$REPO"/libfprint/0001-vfs0090-driver.patch "$B/SOURCES/"
-cp "$REPO"/libfprint/libfprint.spec "$B/SPECS/"
-spectool -g -C "$B/SOURCES" "$B/SPECS/libfprint.spec"
-sudo dnf -y builddep "$B/SPECS/libfprint.spec"
-rpmbuild --define "_topdir $B" -bb "$B/SPECS/libfprint.spec" > "$B/build.log" 2>&1 || { echo "build failed, see $B/build.log" >&2; exit 1; }
-rpm=$(ls "$B"/RPMS/x86_64/libfprint-1.94.100-*vfs0090*.x86_64.rpm | grep -v -e devel -e debug -e tests)
-echo "built: $rpm"
+if [ -n "${PREBUILT:-}" ]; then
+    rpm=$(ls "$(realpath "$PREBUILT")"/libfprint-1.94.100-*vfs0090*.x86_64.rpm)
+    rpm -q dnf5-plugins >/dev/null || sudo dnf -y install dnf5-plugins   # for dnf versionlock
+else
+    command -v spectool >/dev/null || sudo dnf -y install rpm-build rpmdevtools dnf5-plugins
+    echo "== building libfprint 1.94.100 + vfs0090 (log: $B/build.log)"
+    rm -rf "$B"; mkdir -p "$B"/{SOURCES,SPECS}
+    cp "$REPO"/libfprint/0001-vfs0090-driver.patch "$B/SOURCES/"
+    cp "$REPO"/libfprint/libfprint.spec "$B/SPECS/"
+    spectool -g -C "$B/SOURCES" "$B/SPECS/libfprint.spec"
+    sudo dnf -y builddep "$B/SPECS/libfprint.spec"
+    rpmbuild --define "_topdir $B" -bb "$B/SPECS/libfprint.spec" > "$B/build.log" 2>&1 || { echo "build failed, see $B/build.log" >&2; exit 1; }
+    rpm=$(ls "$B"/RPMS/x86_64/libfprint-1.94.100-*vfs0090*.x86_64.rpm | grep -v -e devel -e debug -e tests)
+fi
+echo "libfprint: $rpm"
 
 echo "== swapping: python-validity stack out, stock fprintd + this libfprint in"
 sudo systemctl disable --now python3-validity.service python3-validity-restart-after-resume.service \
     open-fprintd.service open-fprintd-restart-after-resume.service 2>/dev/null || true
 # libfprint-devel (pulled in as a build dependency) requires Fedora's exact libfprint: remove it too
-sudo dnf -y remove python3-validity open-fprintd fprintd-clients fprintd-clients-pam libfprint-devel
+installed=$(rpm -q python3-validity open-fprintd fprintd-clients fprintd-clients-pam libfprint-devel | grep -v "not installed" || true)
+[ -z "$installed" ] || sudo dnf -y remove $installed
 sudo dnf -y install "$rpm" fprintd fprintd-pam
 sudo dnf versionlock add libfprint
 sudo semanage fcontext -d -t bin_t '/usr/lib/python-validity(/.*)?' 2>/dev/null || true

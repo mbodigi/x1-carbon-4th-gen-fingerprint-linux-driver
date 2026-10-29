@@ -2,3 +2,4 @@ build/
 *.rpm
 *.tar.gz
 *.tar.xz
+dist/

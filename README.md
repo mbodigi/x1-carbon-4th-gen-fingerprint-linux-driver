@@ -55,6 +55,23 @@ fprintd-enroll           # see the tips below
 fprintd-verify
 ```
 
+### Or with the prebuilt RPMs (Fedora 44, x86_64)
+
+The [release](https://github.com/mbodigi/x1-carbon-4th-gen-fingerprint-linux-driver/releases) has the
+five RPMs built from these specs on the tested laptop (unsigned; check them against `SHA256SUMS`).
+No build tools or build time needed:
+
+```sh
+mkdir rpms && cd rpms        # download the release files here, then:
+sha256sum -c SHA256SUMS
+cd ..
+PREBUILT=rpms scripts/1-pair.sh
+PREBUILT=rpms scripts/2-libfprint.sh
+```
+
+They are the exact packages running on the tested machine. They only fit Fedora 44 (Python 3.14,
+libfprint 1.94.100); on anything else, build from source.
+
 Fingerprint for sudo, login and GNOME: `sudo authselect enable-feature with-fingerprint`. The
 scripts leave that choice to you.
 
