@@ -1,0 +1,22 @@
+From 97c47fdc37259617bdbd08d2bb83d26c481914b7 Mon Sep 17 00:00:00 2001
+From: Viktor Dragomiretskyy <Viktor.Dragomiretskyy@gmail.com>
+Date: Fri, 3 Jun 2022 10:23:13 +1200
+Subject: [PATCH] Bump the python package version
+
+---
+ setup.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/setup.py b/setup.py
+index 12c2dee..9c53e29 100755
+--- a/setup.py
++++ b/setup.py
+@@ -3,7 +3,7 @@
+ from setuptools import setup
+ 
+ setup(name='python-validity',
+-      version='0.13',
++      version='0.14',
+       py_modules=[],
+       packages=['validitysensor'],
+       scripts=[
