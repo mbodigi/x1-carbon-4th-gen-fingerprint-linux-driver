@@ -16,7 +16,7 @@ status() {
     echo "python-validity PR #294: $(gh api repos/uunicorn/python-validity/pulls/294 --jq '.state + (if .merged then " (merged)" else "" end)' 2>/dev/null || echo '?')"
     echo "python-validity latest commit: $(gh api 'repos/uunicorn/python-validity/commits?per_page=1' --jq '.[0].sha[0:7] + " " + .[0].commit.committer.date[0:10]' 2>/dev/null || echo '?')"
     echo "libfprint vfs0090 port latest commit: $(gh api 'repos/Zaytzew/libfprint-vfs0090-1.94/commits?per_page=1' --jq '.[0].sha[0:7] + " " + .[0].commit.committer.date[0:10]' 2>/dev/null || echo '?')"
-    echo "Fedora libfprint: $(dnf -q repoquery --refresh --latest-limit 1 --qf '%{version}-%{release}' libfprint 2>/dev/null || echo '?')"
+    echo "Fedora libfprint: $(dnf -q repoquery --setopt='disable_excludes=*' --refresh --latest-limit 1 --qf '%{version}-%{release}' libfprint 2>/dev/null || echo '?')"
     echo "Fedora fprintd: $(dnf -q repoquery --latest-limit 1 --qf '%{version}-%{release}' fprintd 2>/dev/null || echo '?')"
 }
 
@@ -68,7 +68,7 @@ EOF
 # is there anything newer than what the installed driver was built from?
 up_to_date() {
     local fedora installed remote_patch local_patch
-    fedora=$(dnf -q repoquery --refresh --latest-limit 1 --qf '%{version}-%{release}' libfprint 2>/dev/null) || return 1
+    fedora=$(dnf -q repoquery --setopt='disable_excludes=*' --refresh --latest-limit 1 --qf '%{version}-%{release}' libfprint 2>/dev/null) || return 1
     installed=$(rpm -q --qf '%{version}-%{release}' libfprint | sed 's/\.vfs0090//')   # 1.94.100-1.vfs0090.fc44 -> 1.94.100-1.fc44
     remote_patch=$(curl -fsSL "$PATCH_URL" | sha256sum | cut -d' ' -f1) || return 1
     local_patch=$(sha256sum < "$REPO/libfprint/0001-vfs0090-driver.patch" | cut -d' ' -f1)
