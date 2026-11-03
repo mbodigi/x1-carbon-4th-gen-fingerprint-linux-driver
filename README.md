@@ -1,7 +1,7 @@
-# ThinkPad X1 Carbon 4th gen fingerprint reader on Linux (Validity VFS7500 `138a:0090`, Fedora 44)
+# ThinkPad X1 Carbon 4th gen fingerprint reader on Linux (Validity VFS7500 `138a:0090`, Fedora 44 and 45)
 
 Build recipes, patches and two scripts that got the fingerprint reader of a **ThinkPad X1 Carbon
-4th gen** working on **Fedora 44**: enroll, `fprintd-verify`, and PAM (lock screen, polkit dialogs).
+4th gen** working on **Fedora 44 and 45**: enroll, `fprintd-verify`, and PAM (lock screen, polkit dialogs).
 
 ```
 $ lsusb -d 138a:0090
@@ -11,6 +11,14 @@ Bus 001 Device 004: ID 138a:0090 Validity Sensors, Inc. VFS7500 Touch Fingerprin
 Out of the box, Fedora's `fprintd` says `No devices available` for this sensor. Nothing here is new
 driver work: it packages other people's fixes (see [Credits](#credits)) for current Fedora.
 
+## News
+
+**Fedora 45 (2026-11-03):** works on the tested laptop, upgraded from 44 with Fedora 45's final packages, on the
+release date in Fedora's schedule. The upgrade removed the driver; the pairing and the enrolled finger survived, and the same
+spec rebuilt on 45 in under 2 minutes brought the reader back. Not tried on 45: `scripts/1-pair.sh` (pairing was
+done on 44), `scripts/2-libfprint.sh` and `fingerprint-upgrade` as whole scripts (the same steps were run by hand).
+The prebuilt RPMs are still for Fedora 44 only.
+
 ## Tested on
 
 Exactly one machine, so treat anything else as untested:
@@ -19,8 +27,9 @@ Exactly one machine, so treat anything else as untested:
 |---|---|
 | Laptop | ThinkPad X1 Carbon 4th gen (20FC) |
 | Sensor | `138a:0090`, flash W25Q80B, ROM 6.7 build 164 |
-| OS | Fedora 44, kernel 7.2, Python 3.14, Secure Boot on |
-| Result | pairing, enrollment, `fprintd-verify`, PAM via `pam_fprintd` |
+| OS | Fedora 44 (kernel 7.2, Python 3.14) and Fedora 45 (kernel 7.2, Python 3.15, OpenSSL 4), Secure Boot on |
+| Result on 44 | pairing, enrollment, `fprintd-verify`, PAM via `pam_fprintd` |
+| Result on 45 | driver rebuilt and installed by hand, `fprintd-list` finds the reader, fingerprint works in daily use |
 
 The same sensor ships in other ThinkPads of that generation. People in the upstream issues report
 the same errors and fixes on a **T460s, T460p and P50** ([#287](https://github.com/uunicorn/python-validity/issues/287),
@@ -93,7 +102,9 @@ left, rolled right. If `fprintd-verify` keeps failing, `fprintd-delete $USER` an
   sensor.
 - **The driver outranks Fedora's libfprint** (Epoch 1), so updates leave it alone. If a future
   fprintd ever needs a newer libfprint, dnf will report a conflict instead of silently breaking the
-  reader: rebuild from the spec then. After a Fedora release upgrade, rebuild.
+  reader: rebuild from the spec then. After a Fedora release upgrade, rebuild: the upgrade to 45 replaced the driver
+  with Fedora's libfprint (`No devices available`). `dnf distro-sync` replaces it too; to block that, run
+  `sudo dnf config-manager setopt fedora.excludepkgs=libfprint updates.excludepkgs=libfprint`.
 - After a cancelled scan the driver logs `Deactivation failed at state 1 … transfer timed out` and
   takes about 3 s to release the sensor. Harmless so far.
 - The driver and both patches are community work, outside Fedora and upstream libfprint, in your
