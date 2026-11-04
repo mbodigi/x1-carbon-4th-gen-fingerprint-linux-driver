@@ -120,6 +120,8 @@ fingerprint-update     # is there anything new upstream since the last check?
 fingerprint-upgrade    # rebuild + install the driver from the latest sources, then test it
 ```
 
+`fingerprint-upgrade` builds in a throwaway podman container, so no build tools are installed on your system.
+
 `fingerprint-update` compares the python-validity PR and commits, the vfs0090 port, and Fedora's
 `libfprint`/`fprintd` with the last check (the first run saves a baseline) and says
 `UPDATE AVAILABLE` when a driver rebuild makes sense.

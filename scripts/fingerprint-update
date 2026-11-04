@@ -4,7 +4,7 @@
 #   fingerprint-upgrade    (a link to this script) if Fedora's libfprint or the vfs0090 patch is newer than
 #                          what the installed driver was built from: rebuild the driver RPM, install it, test
 #                          it, update this repo's spec (no commit). --force rebuilds even when up to date.
-# Needs a sensor already set up with scripts/1-pair.sh + scripts/2-libfprint.sh. Uses sudo.
+# Needs a sensor already set up with scripts/1-pair.sh + scripts/2-libfprint.sh, and podman. Uses sudo.
 # Link both names into your PATH from this repo, e.g.:
 #   ln -s "$PWD/scripts/fingerprint-update" "$PWD/scripts/fingerprint-upgrade" ~/.local/bin/
 set -euo pipefail
@@ -86,7 +86,7 @@ build() {
         fi
         echo
     fi
-    local W; W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
+    local W; W=$(mktemp -d); trap "rm -rf '$W'" EXIT
     local B=$REPO/build/libfprint
     rm -rf "$B"; mkdir -p "$B"/{SOURCES,SPECS}
 
@@ -97,22 +97,19 @@ build() {
     curl -fsSL -o "$B/SOURCES/0001-vfs0090-driver.patch" "$PATCH_URL"
     make_spec "$B/SPECS/libfprint.spec"
 
-    echo "== build tools"
-    rpm -qa --qf '%{name}\n' | sort -u > "$W/before.txt"
-    sudo dnf -y -q install rpm-build
-    sudo dnf -y -q builddep "$B/SPECS/libfprint.spec"
-
-    echo "== building (a few minutes, log: $B/build.log)"
-    if ! rpmbuild --define "_topdir $B" -bb "$B/SPECS/libfprint.spec" > "$B/build.log" 2>&1; then
+    echo "== building in a throwaway container, so no build tools land on this system (a few minutes, log: $B/build.log)"
+    if ! podman run --rm --security-opt label=disable -v "$B:/build" "registry.fedoraproject.org/fedora:$(rpm -E %fedora)" bash -euc '
+        dnf -y -q install rpm-build
+        dnf -y -q builddep /build/SPECS/libfprint.spec
+        rpmbuild --define "_topdir /build" -bb /build/SPECS/libfprint.spec' > "$B/build.log" 2>&1; then
         echo "BUILD FAILED (often: the patch no longer fits a newer libfprint). Your driver is unchanged."
-        echo "See $B/build.log. Removing the build tools again."
-        cleanup "$W"; exit 1
+        echo "See $B/build.log."
+        exit 1
     fi
     local rpm; rpm=$(ls "$B"/RPMS/x86_64/libfprint-*vfs0090*.x86_64.rpm | grep -v -e devel -e debug -e tests)
     echo "built: $(rpm -qp --qf '%{EPOCH}:%{NAME}-%{VERSION}-%{RELEASE}' "$rpm")"
 
     echo "== installing + restarting fprintd (it keeps the old library loaded until restarted)"
-    sudo dnf -y remove libfprint-devel >/dev/null 2>&1 || true
     sudo dnf -y reinstall "$rpm" 2>/dev/null || sudo dnf -y install "$rpm"
     sudo systemctl stop fprintd
     rpm -q libfprint
@@ -129,18 +126,7 @@ build() {
         echo "spec/patch unchanged (same sources as before)"
     fi
 
-    cleanup "$W"
     echo; echo "Done."
-}
-
-# remove what the build installed (names that weren't there before and nothing else needs)
-cleanup() {
-    local W=$1
-    rpm -qa --qf '%{name}\n' | sort -u > "$W/after.txt"
-    comm -13 "$W/before.txt" "$W/after.txt" | grep -vxE 'libfprint|fprintd|fprintd-pam' > "$W/new.txt" || true
-    [ -s "$W/new.txt" ] || return 0
-    echo "== removing $(wc -l < "$W/new.txt") build packages"
-    sudo dnf -y -q remove $(tr '\n' ' ' < "$W/new.txt") || echo "(cleanup failed; remove them later with dnf autoremove)"
 }
 
 case "$(basename "$0")" in
